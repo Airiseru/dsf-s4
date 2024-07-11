@@ -6,7 +6,7 @@ langchain==0.1.20
 langchain-community
 beautifulsoup4
 gTTS
-pygame
 pypdf
 streamlit
 pysqlite3-binary
+base64

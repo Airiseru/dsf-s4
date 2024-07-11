@@ -9,10 +9,10 @@ import requests
 from bs4 import BeautifulSoup
 from io import BytesIO
 from gtts import gTTS # need to install
-from pygame import mixer # need to install
 import time
 import random
 from pypdf import PdfReader
+import base64
 __import__('pysqlite3')
 import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
@@ -94,7 +94,6 @@ suggested_questions = {
     ]
 }
 mp3_fp = BytesIO()
-mixer.init()
 
 homepage_titles = {
     "English": {
@@ -395,10 +394,20 @@ def text_to_speech(text, lang='en'):
     tts.write_to_fp(mp3_fp)
     sound = mp3_fp
     sound.seek(0)
-    mixer.music.load(sound, "mp3")
-    mixer.music.play()
-    mixer.music.set_volume(volume)
-    time.sleep(5)
+    
+    # Convert speech to base64 encoding
+    b64 = base64.b64encode(sound.read()).decode('utf-8')
+
+    md = f"""
+        <audio id="audioTag" controls autoplay>
+        <source src="data:audio/mp3;base64,{b64}"  type="audio/mpeg" format="audio/mpeg">
+        </audio>
+        """
+    
+    st.markdown(
+        md,
+        unsafe_allow_html=True,
+    )
 
 #####     BTS Contants     #####
 # Initialize database
@@ -493,8 +502,6 @@ scroll_back_to_top_btn = f"""
 
 # Homepage
 def home():
-    mixer.music.stop()
-    
     # Get the text variables in the proper language
     problem = homepage_titles[lang]["problem"]
     prob_desc = homepage_titles[lang]["prob_desc"]
@@ -773,7 +780,6 @@ def query_page():
 
 # Upload Page
 def upload_page():
-    mixer.music.stop()
     st.title(APP_NAME)
     st.write("___")
     st.subheader("Add to Database")
@@ -843,7 +849,5 @@ with st.sidebar.expander("⚙️ Response Settings"):
         "Language Options", ["English", "Tagalog", "Cebuano", "Hiligaynon", "Ilocano"]
     )
     speak = st.toggle("Text to Speech")
-    if speak:
-        volume = st.slider("Volume Settings", min_value=0.0, max_value=1.0, value=0.5, step=0.1, format="%f")
 
 pg.run()
