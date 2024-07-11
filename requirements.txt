@@ -9,3 +9,4 @@ gTTS
 pygame
 pypdf
 streamlit
+pysqlite3-binary

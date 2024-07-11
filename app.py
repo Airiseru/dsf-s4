@@ -13,6 +13,9 @@ from pygame import mixer # need to install
 import time
 import random
 from pypdf import PdfReader
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 #####     CONSTANTS     #####
 OPENAI_APIKEY = st.secrets["OPENAI_API_KEY"]
