@@ -375,12 +375,15 @@ def new_process(url, title, collection, isPDF = False):
     df = get_dataframe(collection)
     ver = 0
     
+    try:
     # If using the same title as an existing one, update the version
-    if title in list(df['process_title']):
-        ver = df[df['process_title'] == title]['version'].max() + 1
-    # If the link exists in the database, just get a new version
-    if url in list(df['url']) and title not in list(df['process_title']):
-        ver = df[df["url"]==url]['version'][0] + 1
+        if title in list(df['process_title']):
+            ver = df[df['process_title'] == title]['version'].max() + 1
+        # If the link exists in the database, just get a new version
+        if url in list(df['url']) and title not in list(df['process_title']):
+            ver = df[df["url"]==url]['version'][0] + 1
+    except KeyError:
+        pass
 
     # Update the database
     if isPDF:
