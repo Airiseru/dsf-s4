@@ -1,0 +1,10 @@
+openai
+numpy
+chromadb
+scikit-learn
+langchain
+langchain-community
+beautifulsoup4
+gTTS
+pygame
+pypdf
