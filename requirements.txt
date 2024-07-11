@@ -9,4 +9,3 @@ gTTS
 pypdf
 streamlit
 pysqlite3-binary
-base64
