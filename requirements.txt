@@ -1,8 +1,8 @@
 openai
 numpy
-chromadb
+chromadb==0.4.24
 scikit-learn
-langchain
+langchain==0.1.20
 langchain-community
 beautifulsoup4
 gTTS
