@@ -1,4 +1,8 @@
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 import streamlit as st
+from streamlit_feedback import streamlit_feedback
 import pandas as pd
 import openai
 from openai import OpenAI
@@ -9,13 +13,11 @@ import requests
 from bs4 import BeautifulSoup
 from io import BytesIO
 from gtts import gTTS # need to install
-import time
+from datetime import datetime
 import random
 from pypdf import PdfReader
 import base64
-__import__('pysqlite3')
-import sys
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+import os
 
 #####     CONSTANTS     #####
 OPENAI_APIKEY = st.secrets["OPENAI_API_KEY"]
@@ -23,6 +25,13 @@ EMBEDDING_MODEL = 'text-embedding-3-large'  # 'text-embedding-3-small'
 #SPACY_MODEL = spacy.load('en_core_web_sm') # 'en_core_web_lg'
 APP_NAME = "Government ProcessEase"
 APP_DESC = "GovEase: Making government processes a breeze"
+
+if "lang" not in st.session_state:
+    st.session_state["lang"] = "English"
+
+if "speak" not in st.session_state:
+    st.session_state['speak'] = False
+
 lang = "English"
 speak = False
 volume = 0.5
@@ -94,6 +103,8 @@ suggested_questions = {
     ]
 }
 mp3_fp = BytesIO()
+__location__ = os.path.realpath(
+    os.path.join(os.getcwd(), os.path.dirname(__file__)))
 
 homepage_titles = {
     "English": {
@@ -191,6 +202,10 @@ homepage_titles = {
         "data_how_to": "No kayatmo ti manginayon ti panid ti web iti database:\n\n1. Isurat ti link iti text area\n2. Isurat ti paulo ti proseso\n3. Pinduten ti Upload! buton\n4. Kitaen ti database tapno makita no sibaballigi a nainayon dayta\n\nNo kayatmo ti mangnayon iti PDF file:\n1. I-click ti 'I-upload ti PDF'.\n2. I-upload ang PDF file na nais mong idagdag\n3. Isurat ti paulo ti proseso\n4. Pinduten ti Upload! buton\n\nPakaammo: Siguraduen a saan nga aggigiddan nga i-upload ti link ken PDF file.",
         "how": "Kasano ti Agusar"
     }
+}
+
+feedback_faces = {
+    "😀": ":smiley:", "🙂": ":sweat_smile:", "😐": ":neutral_face:", "🙁": ":worried:", "😞": ":disappointed:"
 }
 
 #####     FUNCTIONS     #####
@@ -362,10 +377,13 @@ def get_dataframe(collection, latest=False):
 
     df = pd.DataFrame(database)
 
-    # If only want to get the latest versions of the processes in the collection
-    if latest:
-        df.sort_values(by='version', inplace=True)
-        df.drop_duplicates(subset="process_title", keep='last', inplace=True)
+    try:
+        # If only want to get the latest versions of the processes in the collection
+        if latest:
+            df.sort_values(by='version', inplace=True)
+            df.drop_duplicates(subset="process_title", keep='last', inplace=True)
+    except:
+        pass
     
     # return database
     return df.reset_index().drop(columns=['index'], axis=1)
@@ -376,13 +394,13 @@ def new_process(url, title, collection, isPDF = False):
     ver = 0
     
     try:
-    # If using the same title as an existing one, update the version
+        # If using the same title as an existing one, update the version
         if title in list(df['process_title']):
             ver = df[df['process_title'] == title]['version'].max() + 1
         # If the link exists in the database, just get a new version
         if url in list(df['url']) and title not in list(df['process_title']):
             ver = df[df["url"]==url]['version'][0] + 1
-    except KeyError:
+    except:
         pass
 
     # Update the database
@@ -411,6 +429,12 @@ def text_to_speech(text, lang='en'):
         md,
         unsafe_allow_html=True,
     )
+
+def clear_url_input():
+    st.session_state.url = st.session_state.url_input
+    st.session_state.upload_title = st.session_state.process_title
+    st.session_state.url_input = ""
+    st.session_state.process_title = ""
 
 #####     BTS Contants     #####
 # Initialize database
@@ -505,6 +529,8 @@ scroll_back_to_top_btn = f"""
 
 # Homepage
 def home():
+    #mixer.music.stop()
+    
     # Get the text variables in the proper language
     problem = homepage_titles[lang]["problem"]
     prob_desc = homepage_titles[lang]["prob_desc"]
@@ -695,6 +721,7 @@ def query_page():
     st.write("___")
     df = get_dataframe(collection, latest=True)
     orig_titles = list(df['process_title'])
+    response = ""
 
     if lang != "English":
         titles = list(map(lambda x: generate_translation(x, llm, "English", lang), orig_titles))
@@ -731,18 +758,65 @@ def query_page():
     if "title" not in st.session_state:
         st.session_state['title'] = ""
 
+    # Initialize feedback
+    if "feedback" not in st.session_state:
+        st.session_state['feedback'] = None
+
+    # Initiliaze spoken
+    if "spoken" not in st.session_state:
+        st.session_state['spoken'] = False
+
+    # Initialize total number of responses
+    if "total_responses" not in st.session_state:
+        st.session_state['total_responses'] = 0
+
     # Initialize chat history or reset history if you change
     if "messages" not in st.session_state or st.session_state['title'] != title:
+        try:
+            if len(st.session_state.messages) > 0:
+                st.session_state.total_responses += len(st.session_state.messages)
+        except:
+            pass
+
         st.session_state.messages = []
         st.session_state['title'] = title
+        st.session_state['feedback'] = None
     
     # Display chat messages from history
-    for message in st.session_state.messages:
+    for i, message in enumerate(st.session_state.messages):
         with st.chat_message(message['role']):
             st.markdown(message['content'])
-                
+            if message['role'] == "assistant":
+                proc_title = st.session_state['title']
+                question = st.session_state.messages[i-1]['content']
+                current_date = str(datetime.utcnow())
+                idx = st.session_state.total_responses
+
+                # Text to Speech the response (if enabled)
+                if st.session_state['speak'] and (i == len(st.session_state.messages) - 1) and not(st.session_state['spoken']):
+                    st.session_state['spoken'] = True
+                    if st.session_state['lang'] == 'English':
+                        text_to_speech(message['content'], lang='en')
+                    else:
+                        # tl = Filipino (the only one available)
+                        text_to_speech(message['content'], lang='tl')
+                    
+                st.caption("Was this helpful?")
+                streamlit_feedback(
+                    feedback_type="faces",
+                    key = f'comment_{i+idx}_{len(message)}_{"-".join(proc_title)}',
+                    optional_text_label="Please provide some more information here...",
+                    # max_text_length=1500,
+                    align='flex-start',
+                    kwargs={"question": question, "llm_response": message['content'], "process": proc_title, "feedback_time": current_date},
+                    on_submit=_submit_feedback
+                )
+
     # Accept user input
     if prompt := st.chat_input(user_prompt):
+        # Reset feedback
+        st.session_state.feedback = None
+
         # Add user message to chat history
         st.session_state.messages.append({"role": "user",
                                             "content": prompt})
@@ -764,25 +838,19 @@ def query_page():
                 if lang != "English":
                     response = generate_translation(response, llm, "English", lang)
 
-            st.markdown(response)
+                st.markdown(response)
 
-            st.session_state.messages.append({"role": "assistant",
+                st.session_state.messages.append({"role": "assistant",
                                                 "content": response})
-
-            # Text to Speech the response (if enabled)
-            if speak:
-                if lang == 'English':
-                    text_to_speech(response, lang='en')
-                else:
-                    # tl = Filipino (the only one available)
-                    text_to_speech(response, lang='tl')
             
-        
         # Add a scroll back to top button
         st.markdown(scroll_back_to_top_btn, unsafe_allow_html=True)
+        st.session_state['spoken'] = False
+        st.rerun()
 
 # Upload Page
 def upload_page():
+    #mixer.music.stop()
     st.title(APP_NAME)
     st.write("___")
     st.subheader("Add to Database")
@@ -792,12 +860,27 @@ def upload_page():
     text = ""
     url_tab, pdf_tab = st.tabs(["Upload Link", "Upload PDF"])
 
+    if "url_input" not in st.session_state:
+        st.session_state.url_input = ""
+
+    if "url" not in st.session_state:
+        st.session_state.url = ""
+    
+    if "process_title" not in st.session_state:
+        st.session_state.process_title = ""
+    
+    if "title" not in st.session_state:
+        st.session_state.title = ""
+    
+    if "file_uploader_key" not in st.session_state:
+        st.session_state.file_uploader_key = 0
+
     # Get the link/file and title from the user
     with url_tab:
-        url = st.text_area("Enter URL:", placeholder="Enter the URL of the process you want to upload").strip()
+        url = st.text_area("Enter URL:", placeholder="Enter the URL of the process you want to upload", key='url_input').strip()
         upload_type = 'url'
     with pdf_tab:
-        uploaded_file = st.file_uploader("Choose a PDF file", type='pdf')
+        uploaded_file = st.file_uploader("Choose a PDF file", type='pdf', key=st.session_state['file_uploader_key'])
         if uploaded_file is not None:
             upload_type = 'pdf'
             # Create PDF reader
@@ -808,16 +891,17 @@ def upload_page():
             for page in reader.pages:
                 text += page.extract_text()
 
-    title = st.text_area("Enter process title:", placeholder="Enter the title of the process you are adding").strip()
+    title = st.text_area("Enter process title:", placeholder="Enter the title of the process you are adding", key='process_title').strip()
 
     # Update collection
-    if st.button("Upload!") and (url != "" or text != "") and title != "":
+    if st.button("Upload!", on_click=clear_url_input) and (st.session_state.url != "" or text != "") and st.session_state.upload_title != "":
         if upload_type == 'url':
-            new_process(url, title, collection, False)
-            # st.toast
+            new_process(st.session_state.url, st.session_state.upload_title, collection, False)
         else:
             url = " ".join(text.split())
-            new_process(url, title, collection, True)
+            new_process(url, st.session_state.upload_title, collection, True)
+            st.session_state['file_uploader_key'] += 1
+            st.rerun()
     
         st.toast("Successfully added to database!", icon='🎉')
 
@@ -831,19 +915,44 @@ def upload_page():
     with unique_tab:
         df = get_dataframe(collection, latest=True)
         st.dataframe(df)
-    
 
 #####     MAIN SITE     #####
 # Create streamlit app
 st.set_page_config(layout='wide')
 
+def _submit_feedback(feedback, *args, **kwargs):
+    st.toast("Thank you for the feedback!", icon='🎉')
+
+    question = kwargs['question']
+    llm_response = kwargs['llm_response']
+    process_title = kwargs['process']
+    feedback_sent = kwargs["feedback_time"]
+    try:
+        with open(os.path.join(__location__, 'feedback.txt'), 'a') as f:
+            line = '===============================================================================================================\n\n'
+            
+            reax = feedback_faces.get(feedback['score'])
+            text = f"{line}*Feedback was sent at {feedback_sent}*\n\n**PROCESS:** {process_title}\n\n**QUESTION:** {question}\n\n**RESPONSE:** {llm_response}\n\n**FEEDBACK:**\n> Reaction: {reax}\n\n> Comment: {feedback['text']}\n\n"
+            
+            f.write(text)
+    except:
+        pass
+
+# Feedback Page
+def display_feedback():
+    if os.path.exists("feedback.txt"):
+        # with open("feedback.txt", "r") as f:
+        with open(os.path.join(__location__, 'feedback.txt'), 'r') as f:
+            st.markdown(f.read())
+
 homepage = st.Page(home, title="Home", icon=":material/home:")
 querypage = st.Page(query_page, title="Query Processes", icon=":material/search:")
 uploadpage = st.Page(upload_page, title="Add to Database", icon=":material/upload_file:")
+feedbackpage = st.Page(display_feedback, title='Feedback Page', icon=":material/feedback:")
 
 pg = st.navigation(
     {
-        "Navigation": [homepage, querypage, uploadpage]
+        "Navigation": [homepage, querypage, uploadpage, feedbackpage]
     }
 )
 
@@ -851,6 +960,8 @@ with st.sidebar.expander("⚙️ Response Settings"):
     lang = st.selectbox(
         "Language Options", ["English", "Tagalog", "Cebuano", "Hiligaynon", "Ilocano"]
     )
-    speak = st.toggle("Text to Speech")
+    st.session_state['lang'] = lang
+    speak = st.toggle("Text to Speech", value=st.session_state['speak'])
+    st.session_state['speak'] = speak
 
 pg.run()
