@@ -2,7 +2,8 @@ beautifulsoup4==4.12.3
 chromadb==0.5.3
 gTTS==2.5.1
 langchain_text_splitters==0.2.2
-openai==1.35.13
+openai==1.55.3
+httpx==0.27.2
 pandas==2.2.2
 pygame==2.6.0
 pypdf==4.2.0
